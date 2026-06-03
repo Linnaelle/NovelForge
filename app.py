@@ -1,8 +1,8 @@
+# pyright: reportMissingTypeStubs=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false
 """Streamlit dashboard for NovelForge genre prediction."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import joblib
@@ -11,12 +11,9 @@ import streamlit as st
 from sklearn.preprocessing import MultiLabelBinarizer
 
 PROJECT_DIR = Path(__file__).resolve().parent
-SRC_DIR = PROJECT_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
 
-from baseline_ml import BaselineModel
-from preprocessing import (
+from src.baseline_ml import BaselineModel
+from src.preprocessing import (
     TextPreprocessor,
     add_filtered_label_column,
     clean_dataframe,
@@ -25,7 +22,7 @@ from preprocessing import (
     parse_multilabel_cell,
     remove_synopsis_anomalies,
 )
-from project_config import GENRE_VOCABULARY
+from src.project_config import GENRE_VOCABULARY
 
 
 MODELS_DIR = PROJECT_DIR / "models"
@@ -54,7 +51,7 @@ def load_dataset() -> pd.DataFrame:
     return df
 
 
-@st.cache_resource(show_spinner="Chargement ou entraînement de la baseline TF-IDF...")
+@st.cache_resource(show_spinner="Chargement ou entrainement de la baseline TF-IDF...")
 def load_or_train_baseline():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -87,7 +84,7 @@ def load_transformer_if_available():
     if not TRANSFORMER_DIR.exists() or not TRANSFORMER_LABELS_PATH.exists():
         return None, None
 
-    from transformer_model import NovelForgeTransformer, TransformerConfig
+    from src.transformer_model import NovelForgeTransformer, TransformerConfig
 
     labels = joblib.load(TRANSFORMER_LABELS_PATH)
     id2label = {index: label for index, label in enumerate(labels)}

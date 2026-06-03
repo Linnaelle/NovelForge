@@ -157,11 +157,11 @@ class NovelForgeTransformer:
         predictions = (probabilities >= threshold).astype(int)
 
         return {
-            "f1_micro": f1_score(labels, predictions, average="micro", zero_division=0),
-            "f1_macro": f1_score(labels, predictions, average="macro", zero_division=0),
-            "f1_weighted": f1_score(labels, predictions, average="weighted", zero_division=0),
-            "jaccard_samples": jaccard_score(labels, predictions, average="samples", zero_division=0),
-            "hamming_loss": hamming_loss(labels, predictions),
+            "f1_micro": float(f1_score(labels, predictions, average="micro", zero_division=0)),
+            "f1_macro": float(f1_score(labels, predictions, average="macro", zero_division=0)),
+            "f1_weighted": float(f1_score(labels, predictions, average="weighted", zero_division=0)),
+            "jaccard_samples": float(jaccard_score(labels, predictions, average="samples", zero_division=0)),
+            "hamming_loss": float(hamming_loss(labels, predictions)),
             "classification_report_text": classification_report(
                 labels,
                 predictions,
@@ -176,8 +176,8 @@ class NovelForgeTransformer:
         """Persist model and tokenizer."""
         output_dir = Path(output_dir or self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        self.model.save_pretrained(output_dir)
-        self.tokenizer.save_pretrained(output_dir)
+        self.model.save_pretrained(output_dir)  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+        self.tokenizer.save_pretrained(output_dir)  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
 
     @classmethod
     def load(
@@ -197,6 +197,6 @@ class NovelForgeTransformer:
         probabilities = torch.sigmoid(torch.tensor(prediction.predictions)).numpy()
         predictions = (probabilities >= self.config.threshold).astype(int)
         return {
-            "f1_micro": f1_score(labels, predictions, average="micro", zero_division=0),
-            "f1_macro": f1_score(labels, predictions, average="macro", zero_division=0),
+            "f1_micro": float(f1_score(labels, predictions, average="micro", zero_division=0)),
+            "f1_macro": float(f1_score(labels, predictions, average="macro", zero_division=0)),
         }

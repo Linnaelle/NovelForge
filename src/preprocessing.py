@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import ast
+import math
 import re
 from dataclasses import dataclass
 from typing import Iterable
@@ -20,6 +21,11 @@ _URL_RE = re.compile(r"https?://\S+|www\.\S+")
 _MULTISPACE_RE = re.compile(r"\s+")
 _TOKEN_RE = re.compile(r"\b[a-zA-Z][a-zA-Z'-]*\b")
 _LABEL_SPLIT_RE = re.compile(r"\s*(?:,|;|\||/)\s*")
+
+
+def _is_missing_scalar(value: object) -> bool:
+    """Return True for scalar missing values without triggering pandas typing noise."""
+    return value is None or value is pd.NA or (isinstance(value, float) and math.isnan(value))
 
 
 def _load_wordnet_lemmatizer():
@@ -58,7 +64,7 @@ class TextPreprocessor:
 
     def clean_text(self, value: object) -> str:
         """Clean a single synopsis value and return a normalized string."""
-        if pd.isna(value):
+        if _is_missing_scalar(value):
             return ""
 
         text = html.unescape(str(value))
@@ -132,7 +138,7 @@ def parse_multilabel_cell(value: object) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         raw_items = value
     else:
-        if value is None or pd.isna(value):
+        if _is_missing_scalar(value):
             return []
 
         text = str(value).strip()

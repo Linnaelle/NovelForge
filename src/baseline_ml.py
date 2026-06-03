@@ -7,7 +7,7 @@ experiment remains reproducible and easy to reuse.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -30,9 +30,9 @@ class BaselineModel:
     ngram_range: tuple[int, int] = (1, 2)
     min_df: int = 2
     max_df: float = 0.95
-    penalty: str = "l2"
+    penalty: Literal["l1", "l2"] = "l2"
     C: float = 1.0
-    solver: str = "lbfgs"
+    solver: Literal["lbfgs", "liblinear", "newton-cg", "newton-cholesky", "sag", "saga"] = "lbfgs"
     max_iter: int = 1_000
     random_state: int = 42
 

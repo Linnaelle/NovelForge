@@ -1,0 +1,27 @@
+{
+  "typeCheckingMode": "basic",
+  "extraPaths": ["src"],
+  "exclude": [
+    "venv",
+    "data",
+    "models",
+    "notebooks",
+    "**/__pycache__"
+  ],
+  "ignore": [
+    "notebooks"
+  ],
+  "reportMissingTypeStubs": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownLambdaType": "none",
+  "reportConstantRedefinition": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOperatorIssue": "none",
+  "reportArgumentType": "none",
+  "reportCallIssue": "none",
+  "reportReturnType": "none"
+}

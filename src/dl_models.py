@@ -6,7 +6,7 @@ import re
 import time
 from collections import Counter
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Literal, Sized, cast
 
 import numpy as np
 import torch
@@ -199,21 +199,23 @@ def train_lstm_model(
             optimizer.step()
             train_loss += loss.item() * input_ids.size(0)
 
-        train_loss /= len(train_loader.dataset)
+        train_loss /= len(cast(Sized, train_loader.dataset))
         valid_metrics = evaluate_lstm_model(model, valid_loader, config.threshold, device=device)
+        valid_f1_micro = float(valid_metrics["f1_micro"])
+        valid_f1_macro = float(valid_metrics["f1_macro"])
         epoch_seconds = time.perf_counter() - start_time
 
         row = {
             "epoch": float(epoch),
             "train_loss": train_loss,
-            "valid_f1_micro": valid_metrics["f1_micro"],
-            "valid_f1_macro": valid_metrics["f1_macro"],
+            "valid_f1_micro": valid_f1_micro,
+            "valid_f1_macro": valid_f1_macro,
             "epoch_seconds": epoch_seconds,
         }
         history.append(row)
 
-        if valid_metrics["f1_micro"] > best_valid_f1:
-            best_valid_f1 = valid_metrics["f1_micro"]
+        if valid_f1_micro > best_valid_f1:
+            best_valid_f1 = valid_f1_micro
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
             epochs_without_improvement = 0
         else:
@@ -260,7 +262,7 @@ def find_best_threshold(
     y_true: np.ndarray,
     y_proba: np.ndarray,
     thresholds: Iterable[float] | None = None,
-    average: str = "micro",
+    average: Literal["micro", "macro", "samples", "weighted", "binary"] = "micro",
 ) -> tuple[float, float]:
     """Find the threshold that maximizes F1 on validation probabilities."""
     thresholds = thresholds or np.arange(0.10, 0.55, 0.05)
@@ -269,12 +271,12 @@ def find_best_threshold(
 
     for threshold in thresholds:
         y_pred = (y_proba >= threshold).astype(int)
-        score = f1_score(y_true, y_pred, average=average, zero_division=0)
+        score = float(f1_score(y_true, y_pred, average=average, zero_division=0))
         if score > best_score:
             best_score = score
             best_threshold = float(threshold)
 
-    return best_threshold, best_score
+    return best_threshold, float(best_score)
 
 
 def evaluate_lstm_model(
@@ -285,7 +287,8 @@ def evaluate_lstm_model(
     device: torch.device | None = None,
 ) -> dict[str, object]:
     """Evaluate an LSTM with the same multilabel metrics as the ML baseline."""
-    y_true = data_loader.dataset.labels.numpy().astype(int)
+    dataset = cast(TextMultilabelDataset, data_loader.dataset)
+    y_true = dataset.labels.numpy().astype(int)
     y_proba = predict_proba_lstm(model, data_loader, device=device)
     y_pred = (y_proba >= threshold).astype(int)
 

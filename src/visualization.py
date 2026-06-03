@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import re
 from collections import Counter
 from typing import Iterable
@@ -13,6 +14,11 @@ import seaborn as sns
 
 
 GENRE_SPLIT_RE = re.compile(r"\s*(?:,|;|\||/)\s*")
+
+
+def _is_missing_scalar(value: object) -> bool:
+    """Return True for scalar missing values without triggering pandas typing noise."""
+    return value is None or value is pd.NA or (isinstance(value, float) and math.isnan(value))
 
 
 def set_plot_style() -> None:
@@ -38,7 +44,7 @@ def _parse_genres(value: object) -> list[str]:
     if isinstance(value, (list, tuple, set)):
         raw_items = value
     else:
-        if value is None or pd.isna(value):
+        if _is_missing_scalar(value):
             return []
 
         text = str(value).strip()
@@ -99,10 +105,11 @@ def plot_synopsis_length_distribution(
 ):
     """Plot a histogram of synopsis lengths with a mean reference line."""
     set_plot_style()
-    lengths = df[length_column].dropna()
+    lengths = pd.to_numeric(df[length_column], errors="coerce").dropna()
+    plot_data = pd.DataFrame({length_column: lengths})
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    sns.histplot(lengths, bins=bins, kde=True, ax=ax, color="#2a9d8f")
+    sns.histplot(data=plot_data, x=length_column, bins=bins, kde=True, ax=ax, color="#2a9d8f")
 
     mean_length = lengths.mean()
     median_length = lengths.median()
