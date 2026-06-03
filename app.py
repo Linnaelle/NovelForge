@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+from io import BytesIO
 from pathlib import Path
 
 import joblib
@@ -32,12 +34,51 @@ TRANSFORMER_DIR = MODELS_DIR / "transformer_novelforge"
 TRANSFORMER_LABELS_PATH = MODELS_DIR / "transformer_labels.joblib"
 
 
-def load_dataset() -> pd.DataFrame:
-    data_path = PROJECT_DIR / "data" / "data.csv"
-    if not data_path.exists():
-        raise FileNotFoundError("data/data.csv introuvable.")
+def find_dataset_path() -> Path | None:
+    """Return the first available local dataset path."""
+    candidates = [
+        PROJECT_DIR / "data" / "data.csv",
+        PROJECT_DIR / "data.csv",
+    ]
 
-    df_raw = pd.read_csv(data_path)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+def get_configured_dataset_url() -> str | None:
+    """Read a private dataset URL from environment variables or Streamlit secrets."""
+    env_url = os.getenv("NOVELFORGE_DATASET_URL")
+    if env_url:
+        return env_url
+
+    try:
+        secret_url = st.secrets.get("NOVELFORGE_DATASET_URL") or st.secrets.get("dataset_url")
+    except Exception:
+        secret_url = None
+
+    return str(secret_url) if secret_url else None
+
+
+def load_dataset(uploaded_dataset: bytes | None = None, dataset_url: str | None = None) -> pd.DataFrame:
+    """Load the dataset without requiring it to be versioned in Git."""
+    if uploaded_dataset is not None:
+        df_raw = pd.read_csv(BytesIO(uploaded_dataset))
+    else:
+        data_path = find_dataset_path()
+        if data_path is not None:
+            df_raw = pd.read_csv(data_path)
+        elif dataset_url:
+            df_raw = pd.read_csv(dataset_url)
+        else:
+            raise FileNotFoundError(
+                "Dataset introuvable. Le dataset n'est pas versionne dans Git : "
+                "ajoute `data/data.csv` en local, configure le secret Streamlit "
+                "`NOVELFORGE_DATASET_URL`, ou importe un CSV depuis la barre laterale."
+            )
+
     df_raw = drop_columns_if_present(df_raw, ["cover"])
 
     text_column = infer_column(df_raw.columns, ["synopsis", "summary", "description", "overview", "plot", "resume"])
@@ -52,13 +93,13 @@ def load_dataset() -> pd.DataFrame:
 
 
 @st.cache_resource(show_spinner="Chargement ou entrainement de la baseline TF-IDF...")
-def load_or_train_baseline():
+def load_or_train_baseline(uploaded_dataset: bytes | None = None, dataset_url: str | None = None):
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-    if BASELINE_PATH.exists() and BASELINE_LABELS_PATH.exists():
+    if uploaded_dataset is None and dataset_url is None and BASELINE_PATH.exists() and BASELINE_LABELS_PATH.exists():
         return joblib.load(BASELINE_PATH), joblib.load(BASELINE_LABELS_PATH)
 
-    df = load_dataset()
+    df = load_dataset(uploaded_dataset=uploaded_dataset, dataset_url=dataset_url)
     df_model = df[["synopsis_clean", "genre_labels"]].copy()
     df_model["genre_labels"] = df_model["genre_labels"].apply(parse_multilabel_cell)
     df_model = df_model[df_model["genre_labels"].str.len().gt(0)].copy()
@@ -93,8 +134,12 @@ def load_transformer_if_available():
     return NovelForgeTransformer.load(TRANSFORMER_DIR, id2label=id2label, label2id=label2id, config=config), labels
 
 
-def predict_with_baseline(text: str) -> pd.DataFrame:
-    model, labels = load_or_train_baseline()
+def predict_with_baseline(
+    text: str,
+    uploaded_dataset: bytes | None = None,
+    dataset_url: str | None = None,
+) -> pd.DataFrame:
+    model, labels = load_or_train_baseline(uploaded_dataset=uploaded_dataset, dataset_url=dataset_url)
     cleaner = TextPreprocessor(lowercase=True, remove_urls=True, lemmatize=True)
     cleaned = cleaner.clean_text(text)
     probabilities = model.predict_proba([cleaned])[0]
@@ -123,6 +168,26 @@ def main() -> None:
     st.title("NovelForge")
     st.caption("Prediction multilabel des genres d'un Light Novel / Manhwa a partir du synopsis.")
 
+    dataset_url = get_configured_dataset_url()
+    uploaded_dataset_bytes = None
+
+    with st.sidebar:
+        st.header("Donnees")
+        uploaded_dataset = st.file_uploader(
+            "Dataset CSV optionnel",
+            type=["csv"],
+            help="Utile sur Streamlit Cloud si le dataset n'est pas versionne dans Git.",
+        )
+        if uploaded_dataset is not None:
+            uploaded_dataset_bytes = uploaded_dataset.getvalue()
+            st.success("Dataset charge pour cette session.")
+        elif find_dataset_path() is not None:
+            st.success("Dataset local detecte.")
+        elif dataset_url:
+            st.info("Dataset charge via secret Streamlit.")
+        else:
+            st.warning("Aucun dataset disponible pour entrainer la baseline.")
+
     tab_predict, tab_transparency = st.tabs(["Prediction", "Transparence IA"])
 
     with tab_predict:
@@ -143,12 +208,28 @@ def main() -> None:
                 st.warning("Veuillez saisir un synopsis un peu plus long.")
             else:
                 if engine == "Transformer local":
-                    predictions = predict_with_transformer(synopsis)
-                    if predictions is None:
-                        st.info("Aucun Transformer local disponible. La baseline TF-IDF est utilisee.")
-                        predictions = predict_with_baseline(synopsis)
+                    try:
+                        predictions = predict_with_transformer(synopsis)
+                        if predictions is None:
+                            st.info("Aucun Transformer local disponible. La baseline TF-IDF est utilisee.")
+                            predictions = predict_with_baseline(
+                                synopsis,
+                                uploaded_dataset=uploaded_dataset_bytes,
+                                dataset_url=dataset_url,
+                            )
+                    except FileNotFoundError as error:
+                        st.error(str(error))
+                        st.stop()
                 else:
-                    predictions = predict_with_baseline(synopsis)
+                    try:
+                        predictions = predict_with_baseline(
+                            synopsis,
+                            uploaded_dataset=uploaded_dataset_bytes,
+                            dataset_url=dataset_url,
+                        )
+                    except FileNotFoundError as error:
+                        st.error(str(error))
+                        st.stop()
 
                 st.subheader("Genres les plus probables")
                 render_predictions(predictions, top_n=top_n)

@@ -239,6 +239,28 @@ streamlit run app.py
 
 Au premier lancement, si aucun artefact baseline n'existe, l'application entraine et met en cache une baseline TF-IDF locale dans `models/`.
 
+Pour Streamlit Cloud, le dataset n'est pas versionne dans Git. Trois options sont possibles :
+
+- placer `data/data.csv` en local pour le developpement;
+- configurer un secret Streamlit `NOVELFORGE_DATASET_URL` pointant vers une URL CSV privee ou publique;
+- importer le CSV depuis la barre laterale de l'application.
+
+Exemple de secret Streamlit :
+
+```toml
+NOVELFORGE_DATASET_URL = "https://exemple.com/data.csv"
+```
+
+Les fichiers de donnees restent ignores par Git :
+
+```powershell
+git add .gitignore app.py README.md
+git commit -m "Support non-versioned dataset in Streamlit"
+git push
+```
+
+Si aucune de ces sources n'est disponible, l'application affiche un message d'erreur lisible au lieu d'une trace Python.
+
 ## Evaluation biais/variance
 
 Le notebook compare les F1 train et test :
