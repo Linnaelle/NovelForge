@@ -7,6 +7,9 @@ Le projet couvre actuellement :
 - **Jalon 2 - EDA et preprocessing** : analyse exploratoire, nettoyage robuste, detection d'anomalies et visualisations.
 - **Jalon 3 - Baseline ML** : modele classique multilabel avec TF-IDF et regression logistique regularisee.
 - **Jalon 4 - Evaluation ML** : rapport de classification, F1 micro/macro et analyse du compromis biais/variance.
+- **Jalon 5 - Deep Learning fondamental** : conception d'un modele recurrent LSTM pour exploiter la sequentialite du texte.
+- **Jalon 6 - Optimisation DL** : strategie contre le vanishing gradient, Adam, EarlyStopping et recherche d'hyperparametres.
+- **Jalon 7 - Comparaison ML vs DL** : comparaison argumentee des scores et temps de calcul.
 
 Le dataset actuel contient une vraie colonne textuelle `description`, utilisee comme synopsis. La colonne `tags` sert de source de labels multilabel et est filtree pour conserver une taxonomie de genres exploitable.
 
@@ -19,6 +22,8 @@ Le dataset actuel contient une vraie colonne textuelle `description`, utilisee c
 - Construire une baseline ML multilabel avec regularisation L2/Ridge.
 - Evaluer le modele avec des metriques adaptees au multilabel, notamment F1 micro et F1 macro.
 - Analyser le risque de surapprentissage ou sous-apprentissage via les scores train/test.
+- Construire un modele LSTM avec embedding, gates recurrentes et sortie sigmoide multilabel.
+- Comparer le LSTM a la baseline TF-IDF sur les performances et le temps d'entrainement.
 
 ## Arborescence
 
@@ -28,12 +33,14 @@ DeepLearning/
 |   `-- data.csv
 |-- notebooks/
 |   |-- 1_eda.ipynb
-|   `-- 2_baseline_ml.ipynb
+|   |-- 2_baseline_ml.ipynb
+|   `-- 3_deep_learning_fondamental.ipynb
 |-- src/
 |   |-- __init__.py
 |   |-- preprocessing.py
 |   |-- visualization.py
-|   `-- baseline_ml.py
+|   |-- baseline_ml.py
+|   `-- dl_models.py
 |-- requirements.txt
 |-- .gitignore
 `-- README.md
@@ -73,6 +80,7 @@ Puis executer les notebooks dans cet ordre :
 ```text
 notebooks/1_eda.ipynb
 notebooks/2_baseline_ml.ipynb
+notebooks/3_deep_learning_fondamental.ipynb
 ```
 
 Le notebook charge automatiquement `data/data.csv`. Si le dataset porte un autre nom ou se trouve ailleurs, definir la variable d'environnement `NOVELFORGE_DATASET` :
@@ -116,6 +124,19 @@ Contient la baseline ML du Jalon 3 :
 
 La regression logistique utilise une regularisation L2/Ridge. Le parametre `C` controle la force de regularisation : plus `C` est petit, plus la regularisation est forte.
 
+### `src/dl_models.py`
+
+Contient les briques Deep Learning du Jalon 5/6 :
+
+- `TextVocabulary` : construit un vocabulaire word-level depuis le train uniquement.
+- `TextMultilabelDataset` : convertit sequences et labels en dataset PyTorch.
+- `LSTMGenreClassifier` : modele `Embedding` + `LSTM` + `Dense` final pour classification multilabel.
+- `LSTMTrainingConfig` : centralise les hyperparametres du LSTM.
+- `train_lstm_model()` : boucle d'entrainement PyTorch avec Adam, gradient clipping et EarlyStopping.
+- `compute_pos_weight()` : pondere les classes rares dans `BCEWithLogitsLoss`.
+- `find_best_threshold()` : ajuste le seuil multilabel sur validation.
+- `evaluate_lstm_model()` : calcule F1 micro, F1 macro, F1 weighted, Jaccard samples et Hamming loss.
+
 ## Donnees attendues
 
 Le dataset doit contenir au minimum :
@@ -141,6 +162,24 @@ Le notebook `2_baseline_ml.ipynb` a ete execute avec le dataset actuel :
 
 Ces resultats sont une baseline plus realiste que la version precedente, car le modele apprend maintenant depuis les descriptions textuelles. Les scores restent moderes, ce qui est attendu pour une baseline TF-IDF lineaire sur un probleme multilabel desequilibre.
 
+## Resultats Deep Learning actuels
+
+Le notebook `3_deep_learning_fondamental.ipynb` a ete execute avec PyTorch sur CPU :
+
+- lignes utilisees pour le DL : `12,000` lignes, afin de garder un temps de calcul raisonnable sans GPU;
+- taille train : `8,160` lignes;
+- taille validation : `1,440` lignes;
+- taille test : `2,400` lignes;
+- nombre de genres : `34`;
+- meilleure architecture testee : LSTM bidirectionnel, embedding `128`, hidden dim `96`, dropout `0.35`;
+- optimiseur : Adam;
+- strategie anti-vanishing gradient : LSTM gates + gradient clipping;
+- temps de recherche/entrainement : environ `380` secondes;
+- F1 micro test : environ `0.19`;
+- F1 macro test : environ `0.16`.
+
+Le LSTM actuel est donc inferieur a la baseline TF-IDF. Il ameliore le rappel de nombreux genres rares, mais au prix d'une precision faible. Cette comparaison valide le Jalon 7 : le Deep Learning fondamental est plus couteux et necessite davantage de tuning pour depasser une baseline lineaire forte sur ce dataset.
+
 ## Evaluation biais/variance
 
 Le notebook compare les F1 train et test :
@@ -156,5 +195,6 @@ La regularisation L2 limite les coefficients extremes du modele TF-IDF. Elle red
 - Sauvegarder un dataset nettoye intermediaire, par exemple `data/dataset_clean.csv`.
 - Tester plusieurs forces de regularisation avec `C`.
 - Ajuster la taxonomie de genres pour separer strictement genres, formats et tropes.
-- Comparer la baseline TF-IDF a un modele Deep Learning.
+- Ameliorer le LSTM avec plus d'epochs, des seuils par label et des embeddings pre-entraines.
+- Comparer ensuite le LSTM a des architectures modernes de NLP, notamment Transformers.
 - Evaluer les performances par genre pour mieux comprendre les classes rares.

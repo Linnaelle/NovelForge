@@ -5,3 +5,4 @@ nltk
 ipython
 jupyter
 scikit-learn
+torch
