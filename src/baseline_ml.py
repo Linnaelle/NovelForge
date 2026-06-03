@@ -80,6 +80,10 @@ class BaselineModel:
         """Predict binary multilabel outputs."""
         return self.pipeline.predict(X)
 
+    def predict_proba(self, X: pd.Series | list[str]):
+        """Predict multilabel probabilities when the classifier supports it."""
+        return self.pipeline.predict_proba(X)
+
     def evaluate(
         self,
         X_test: pd.Series | list[str],

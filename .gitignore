@@ -4,5 +4,6 @@ data/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+models/
 __pycache__/
 *.pyc

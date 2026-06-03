@@ -10,6 +10,8 @@ Le projet couvre actuellement :
 - **Jalon 5 - Deep Learning fondamental** : conception d'un modele recurrent LSTM pour exploiter la sequentialite du texte.
 - **Jalon 6 - Optimisation DL** : strategie contre le vanishing gradient, Adam, EarlyStopping et recherche d'hyperparametres.
 - **Jalon 7 - Comparaison ML vs DL** : comparaison argumentee des scores et temps de calcul.
+- **Jalon 8 - Deep Learning avance** : Transfer Learning avec un Transformer HuggingFace leger.
+- **Jalon 9 - Deploiement** : dashboard Streamlit interactif pour exploiter le modele.
 
 Le dataset actuel contient une vraie colonne textuelle `description`, utilisee comme synopsis. La colonne `tags` sert de source de labels multilabel et est filtree pour conserver une taxonomie de genres exploitable.
 
@@ -24,6 +26,8 @@ Le dataset actuel contient une vraie colonne textuelle `description`, utilisee c
 - Analyser le risque de surapprentissage ou sous-apprentissage via les scores train/test.
 - Construire un modele LSTM avec embedding, gates recurrentes et sortie sigmoide multilabel.
 - Comparer le LSTM a la baseline TF-IDF sur les performances et le temps d'entrainement.
+- Tester un Transformer pre-entraine pour transferer des representations linguistiques generales vers NovelForge.
+- Deployer une interface Streamlit avec predictions et section Transparence IA.
 
 ## Arborescence
 
@@ -34,13 +38,17 @@ DeepLearning/
 |-- notebooks/
 |   |-- 1_eda.ipynb
 |   |-- 2_baseline_ml.ipynb
-|   `-- 3_deep_learning_fondamental.ipynb
+|   |-- 3_deep_learning_fondamental.ipynb
+|   `-- 4_deep_learning_avance.ipynb
 |-- src/
 |   |-- __init__.py
 |   |-- preprocessing.py
 |   |-- visualization.py
 |   |-- baseline_ml.py
-|   `-- dl_models.py
+|   |-- dl_models.py
+|   |-- transformer_model.py
+|   `-- project_config.py
+|-- app.py
 |-- requirements.txt
 |-- .gitignore
 `-- README.md
@@ -81,6 +89,7 @@ Puis executer les notebooks dans cet ordre :
 notebooks/1_eda.ipynb
 notebooks/2_baseline_ml.ipynb
 notebooks/3_deep_learning_fondamental.ipynb
+notebooks/4_deep_learning_avance.ipynb
 ```
 
 Le notebook charge automatiquement `data/data.csv`. Si le dataset porte un autre nom ou se trouve ailleurs, definir la variable d'environnement `NOVELFORGE_DATASET` :
@@ -137,6 +146,16 @@ Contient les briques Deep Learning du Jalon 5/6 :
 - `find_best_threshold()` : ajuste le seuil multilabel sur validation.
 - `evaluate_lstm_model()` : calcule F1 micro, F1 macro, F1 weighted, Jaccard samples et Hamming loss.
 
+### `src/transformer_model.py`
+
+Contient le pipeline HuggingFace du Jalon 8 :
+
+- `TransformerConfig` : hyperparametres du modele Transformer.
+- `TransformerTextDataset` : dataset PyTorch/HuggingFace pour textes et labels multilabel.
+- `NovelForgeTransformer` : charge un modele pre-entraine, fine-tune legerement, predit des probabilites, evalue et sauvegarde le modele.
+
+Le notebook avance utilise `distilbert-base-uncased`, un Transformer pre-entraine leger, sur un petit sous-echantillon pour prouver que le code tourne en local.
+
 ## Donnees attendues
 
 Le dataset doit contenir au minimum :
@@ -180,6 +199,46 @@ Le notebook `3_deep_learning_fondamental.ipynb` a ete execute avec PyTorch sur C
 
 Le LSTM actuel est donc inferieur a la baseline TF-IDF. Il ameliore le rappel de nombreux genres rares, mais au prix d'une precision faible. Cette comparaison valide le Jalon 7 : le Deep Learning fondamental est plus couteux et necessite davantage de tuning pour depasser une baseline lineaire forte sur ce dataset.
 
+## Resultats Deep Learning avance actuels
+
+Le notebook `4_deep_learning_avance.ipynb` a ete execute avec un fine-tuning tres leger de `distilbert-base-uncased` :
+
+- lignes utilisees : `240` lignes;
+- modele : `distilbert-base-uncased`;
+- entrainement : `1` epoch;
+- temps d'entrainement : environ `28` secondes;
+- F1 micro test : environ `0.18`.
+
+Ce score n'est pas destine a battre la baseline : le sous-echantillon est volontairement minuscule. L'objectif du Jalon 8 est de demontrer une technologie de pointe exploitable localement : Transfer Learning, attention, fine-tuning HuggingFace, evaluation et sauvegarde du modele.
+
+## Dashboard Streamlit
+
+Le fichier `app.py` fournit un dashboard NovelForge :
+
+- saisie libre d'un synopsis;
+- prediction multilabel des genres;
+- affichage des probabilites sous forme de graphique et barres de progression;
+- moteur baseline TF-IDF par defaut, car c'est actuellement le plus robuste;
+- moteur Transformer local si un modele fine-tune est disponible dans `models/transformer_novelforge`;
+- onglet `Transparence IA` presentant les limites du projet.
+
+Commandes pour lancer le dashboard :
+
+```powershell
+cd "<chemin-vers-le-projet>\DeepLearning"
+.\venv\Scripts\Activate.ps1
+streamlit run app.py
+```
+
+Si Streamlit n'est pas encore installe :
+
+```powershell
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Au premier lancement, si aucun artefact baseline n'existe, l'application entraine et met en cache une baseline TF-IDF locale dans `models/`.
+
 ## Evaluation biais/variance
 
 Le notebook compare les F1 train et test :
@@ -197,4 +256,6 @@ La regularisation L2 limite les coefficients extremes du modele TF-IDF. Elle red
 - Ajuster la taxonomie de genres pour separer strictement genres, formats et tropes.
 - Ameliorer le LSTM avec plus d'epochs, des seuils par label et des embeddings pre-entraines.
 - Comparer ensuite le LSTM a des architectures modernes de NLP, notamment Transformers.
+- Fine-tuner le Transformer sur un echantillon plus grand avec GPU.
+- Calibrer les seuils de prediction par genre pour ameliorer le compromis precision/rappel.
 - Evaluer les performances par genre pour mieux comprendre les classes rares.

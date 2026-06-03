@@ -6,3 +6,7 @@ ipython
 jupyter
 scikit-learn
 torch
+transformers
+accelerate
+streamlit
+joblib
