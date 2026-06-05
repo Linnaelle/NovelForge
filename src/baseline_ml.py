@@ -7,7 +7,7 @@ experiment remains reproducible and easy to reuse.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Iterable, Literal
 
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -136,3 +136,53 @@ class BaselineModel:
             )
 
         return metrics
+
+
+def apply_thresholds(probabilities: Any, thresholds: float | list[float]):
+    """Convert multilabel probabilities to binary predictions."""
+    return (probabilities >= thresholds).astype(int)
+
+
+def find_best_global_threshold(
+    y_true: Any,
+    probabilities: Any,
+    thresholds: Iterable[float] | None = None,
+) -> tuple[float, float]:
+    """Find the global decision threshold that maximizes micro F1."""
+    candidate_thresholds = thresholds or [value / 100 for value in range(10, 71, 5)]
+    best_threshold = 0.5
+    best_score = -1.0
+
+    for threshold in candidate_thresholds:
+        y_pred = apply_thresholds(probabilities, threshold)
+        score = f1_score(y_true, y_pred, average="micro", zero_division=0)
+        if score > best_score:
+            best_threshold = float(threshold)
+            best_score = float(score)
+
+    return best_threshold, best_score
+
+
+def find_best_label_thresholds(
+    y_true: Any,
+    probabilities: Any,
+    thresholds: Iterable[float] | None = None,
+) -> list[float]:
+    """Find one F1-optimized threshold per label."""
+    candidate_thresholds = list(thresholds or [value / 100 for value in range(10, 71, 5)])
+    label_thresholds: list[float] = []
+
+    for label_index in range(probabilities.shape[1]):
+        best_threshold = 0.5
+        best_score = -1.0
+
+        for threshold in candidate_thresholds:
+            y_pred = (probabilities[:, label_index] >= threshold).astype(int)
+            score = f1_score(y_true[:, label_index], y_pred, zero_division=0)
+            if score > best_score:
+                best_threshold = float(threshold)
+                best_score = float(score)
+
+        label_thresholds.append(best_threshold)
+
+    return label_thresholds
