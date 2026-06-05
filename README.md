@@ -12,6 +12,12 @@ Le projet couvre actuellement :
 - **Jalon 7 - Comparaison ML vs DL** : comparaison argumentee des scores et temps de calcul.
 - **Jalon 8 - Deep Learning avance** : Transfer Learning avec un Transformer HuggingFace leger.
 - **Jalon 9 - Deploiement** : dashboard Streamlit interactif pour exploiter le modele.
+- **Jalon 10 - Optimisation avant/apres** : enrichissement par MyAnimeList manga, taxonomie regroupee et seuils multilabel calibres.
+
+Les notebooks `1_eda.ipynb` a `4_deep_learning_avance.ipynb` correspondent au projet initial demande : exploration, baseline ML, LSTM et Transformer de demonstration. Les notebooks suivants sont des experiences complementaires visant a ameliorer ou tester le projet au-dela du perimetre initial :
+
+- `5_optimisation_dataset_enrichi.ipynb` : amelioration par enrichissement des donnees, regroupement de labels et calibration des seuils;
+- `6_transformer_enrichi.ipynb` : tentative de Transformer plus ambitieux sur le dataset enrichi.
 
 Le dataset actuel contient une vraie colonne textuelle `description`, utilisee comme synopsis. La colonne `tags` sert de source de labels multilabel et est filtree pour conserver une taxonomie de genres exploitable.
 
@@ -39,12 +45,17 @@ DeepLearning/
 |   |-- 1_eda.ipynb
 |   |-- 2_baseline_ml.ipynb
 |   |-- 3_deep_learning_fondamental.ipynb
-|   `-- 4_deep_learning_avance.ipynb
+|   |-- 4_deep_learning_avance.ipynb
+|   |-- 5_optimisation_dataset_enrichi.ipynb
+|   `-- 6_transformer_enrichi.ipynb
+|-- scripts/
+|   `-- train_enriched_baseline.py
 |-- src/
 |   |-- __init__.py
 |   |-- preprocessing.py
 |   |-- visualization.py
 |   |-- baseline_ml.py
+|   |-- enriched_dataset.py
 |   |-- dl_models.py
 |   |-- transformer_model.py
 |   `-- project_config.py
@@ -90,7 +101,11 @@ notebooks/1_eda.ipynb
 notebooks/2_baseline_ml.ipynb
 notebooks/3_deep_learning_fondamental.ipynb
 notebooks/4_deep_learning_avance.ipynb
+notebooks/5_optimisation_dataset_enrichi.ipynb
+notebooks/6_transformer_enrichi.ipynb
 ```
+
+Pour reproduire strictement le projet initial, executer seulement les notebooks 1 a 4. Les notebooks 5 et 6 sont optionnels et servent a documenter des pistes d'amelioration.
 
 Le notebook charge automatiquement `data/data.csv`. Si le dataset porte un autre nom ou se trouve ailleurs, definir la variable d'environnement `NOVELFORGE_DATASET` :
 
@@ -98,6 +113,8 @@ Le notebook charge automatiquement `data/data.csv`. Si le dataset porte un autre
 $env:NOVELFORGE_DATASET="C:\chemin\vers\dataset.csv"
 jupyter notebook
 ```
+
+Le notebook 5 detecte automatiquement si Jupyter est lance depuis la racine du projet ou depuis le dossier `notebooks/`, puis ajoute la racine au `sys.path` pour importer correctement `src`.
 
 ## Modules principaux
 
@@ -211,6 +228,50 @@ Le notebook `4_deep_learning_avance.ipynb` a ete execute avec un fine-tuning tre
 
 Ce score n'est pas destine a battre la baseline : le sous-echantillon est volontairement minuscule. L'objectif du Jalon 8 est de demontrer une technologie de pointe exploitable localement : Transfer Learning, attention, fine-tuning HuggingFace, evaluation et sauvegarde du modele.
 
+## Resultats optimisation avant/apres
+
+Le notebook `5_optimisation_dataset_enrichi.ipynb` et le script `scripts/train_enriched_baseline.py` comparent une baseline actuelle et une baseline enrichie sur le meme test set issu du dataset NovelForge courant.
+
+L'enrichissement utilise principalement `data/archive (1)/manga_dataset.csv`, qui contient une vraie colonne `synopsis`. La taxonomie est regroupee pour reduire le bruit :
+
+- `Hentai`, `Ecchi`, `Erotica` et `Smut` deviennent `Adult`;
+- `BL`, `GL`, `Yaoi`, `Yuri`, `Boys Love`, `Girls Love`, `Shounen-ai` et `Shoujo-ai` deviennent `BL/GL Romance`;
+- `Sci-Fi` est normalise en `Sci Fi`;
+- des themes MAL utiles comme `School`, `Historical`, `Isekai`, `Psychological`, `Martial Arts`, `Mecha` et `Team Sports` sont rattaches a la taxonomie enrichie.
+
+Resultats actuels sur le test NovelForge groupe :
+
+- baseline avant, dataset courant uniquement : F1 micro `0.485`, F1 macro `0.439`;
+- baseline apres, dataset courant + MAL manga, seuil global : F1 micro `0.514`, F1 macro `0.481`;
+- baseline apres, seuils par label : F1 micro `0.538`, F1 macro `0.491`.
+
+La baseline enrichie est sauvegardee dans `models/enhanced_tfidf.joblib`, avec ses labels et seuils optimises. Les metriques sont disponibles dans `reports/enhanced_before_after_metrics.csv`.
+
+## Transformer enrichi experimental
+
+Le notebook `6_transformer_enrichi.ipynb` reprend le Transformer du notebook 4, mais avec un protocole plus ambitieux :
+
+- utilisation de la taxonomie enrichie du notebook 5;
+- ajout d'un echantillon de `manga_dataset.csv` dans le train;
+- davantage de lignes que le notebook 4;
+- calibration d'un seuil global et de seuils par label;
+- evaluation sur un echantillon NovelForge pour garder un domaine de test comparable.
+
+Ce notebook peut etre long sur CPU. Les constantes en debut de notebook permettent d'augmenter le volume si un GPU est disponible. Les artefacts sont sauvegardes separement dans `models/transformer_enriched_novelforge`, avec `models/transformer_enriched_labels.joblib`, `models/transformer_enriched_thresholds.joblib` et `models/transformer_enriched_metrics.joblib`.
+
+Cette experience sert a verifier l'hypothese du cours : un Transformer est theoriquement plus adapte au NLP, mais son avantage pratique depend du volume de donnees, du temps d'entrainement et des ressources de calcul.
+
+Artefacts principaux du dossier `models/` :
+
+- `baseline_tfidf.joblib` et `baseline_labels.joblib` : baseline TF-IDF classique et ses labels;
+- `enhanced_tfidf.joblib`, `enhanced_labels.joblib`, `enhanced_thresholds.joblib` : baseline enrichie, labels regroupes et seuils par label;
+- `enhanced_metrics.joblib` : metriques detaillees de l'experience avant/apres;
+- `lstm_novelforge.pt` et `lstm_metadata.joblib` : poids PyTorch du LSTM et metadonnees necessaires a son chargement;
+- `transformer_labels.joblib` et `models/transformer_novelforge/` : labels et dossier du Transformer fine-tune.
+- `transformer_enriched_labels.joblib`, `transformer_enriched_thresholds.joblib` et `models/transformer_enriched_novelforge/` : artefacts optionnels du Transformer enrichi du notebook 6.
+
+Un fichier `.joblib` est un fichier de serialisation Python, proche d'un `pickle`, tres utilise avec scikit-learn. Il permet de sauvegarder un objet Python complet, par exemple un pipeline TF-IDF + regression logistique, une liste de labels, des seuils ou des metriques, puis de le recharger sans reentrainer le modele.
+
 ## Dashboard Streamlit
 
 Le fichier `app.py` fournit un dashboard NovelForge :
@@ -218,8 +279,14 @@ Le fichier `app.py` fournit un dashboard NovelForge :
 - saisie libre d'un synopsis;
 - prediction multilabel des genres;
 - affichage des probabilites sous forme de graphique et barres de progression;
+- comparaison cote a cote de plusieurs modeles selectionnes;
 - moteur baseline TF-IDF par defaut, car c'est actuellement le plus robuste;
+- moteur baseline enrichie pour comparer l'etat avant/apres l'ajout du dataset MyAnimeList manga;
+- moteur LSTM PyTorch si les artefacts `models/lstm_novelforge.pt` et `models/lstm_metadata.joblib` existent;
 - moteur Transformer local si un modele fine-tune est disponible dans `models/transformer_novelforge`;
+- moteur Transformer enrichi si le notebook 6 a ete execute et sauvegarde `models/transformer_enriched_novelforge`;
+- options avancees pour importer un CSV et reentrainer temporairement la baseline classique en session;
+- onglet `Avant / Apres` affichant les metriques de comparaison entre baseline classique et baseline enrichie;
 - onglet `Transparence IA` presentant les limites du projet.
 
 Commandes pour lancer le dashboard :
@@ -237,7 +304,21 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Au premier lancement, si aucun artefact baseline n'existe, l'application entraine et met en cache une baseline TF-IDF locale dans `models/`.
+Au premier lancement, si aucun artefact baseline classique n'existe, l'application entraine et met en cache une baseline TF-IDF locale dans `models/`.
+
+La baseline enrichie n'est pas reentrainee depuis l'interface : elle provient du notebook 5 ou du script `scripts/train_enriched_baseline.py`. L'import CSV des options avancees ne concerne donc que la baseline classique de la session.
+
+Pour montrer les trois etapes du projet en soutenance :
+
+- **Baseline TF-IDF + Regression** : approche statistique rapide, efficace, mais insensible a l'ordre des mots et aux negations.
+- **LSTM PyTorch** : approche sequentielle construite dans le notebook 3. Relancer la cellule de sauvegarde du notebook pour generer `models/lstm_novelforge.pt` et `models/lstm_metadata.joblib`.
+- **Transformer / DistilBERT** : approche Transfer Learning avec attention globale, generee dans le notebook 4 si les artefacts Transformer sont disponibles.
+
+Phrase piege utile pour la demonstration :
+
+```text
+Ce n'est pas une histoire d'Action, mais plutot une Romance.
+```
 
 Pour Streamlit Cloud, le dataset n'est pas versionne dans Git. Trois options sont possibles :
 
@@ -260,6 +341,13 @@ git push
 ```
 
 Si aucune de ces sources n'est disponible, l'application affiche un message d'erreur lisible au lieu d'une trace Python.
+
+## Limites importantes
+
+- Les modeles actuels ont ete entraines sur des synopsis en anglais. Un synopsis en francais peut etre saisi, mais les predictions seront moins fiables car le vocabulaire appris est anglophone.
+- Les labels proviennent de tags editoriaux : certains representent des genres narratifs, d'autres des publics cibles, formats, tropes ou contenus adultes.
+- La taxonomie enrichie regroupe volontairement certains labels pour rendre le probleme plus stable, mais cette simplification peut masquer des nuances.
+- Les probabilites affichees dans Streamlit servent a classer des genres plausibles, pas a fournir une certitude absolue.
 
 ## Evaluation biais/variance
 
