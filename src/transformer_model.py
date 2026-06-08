@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,12 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+
+
+def make_training_arguments(**kwargs: Any) -> TrainingArguments:
+    """Create TrainingArguments while ignoring options unsupported by the installed transformers version."""
+    supported_args = set(inspect.signature(TrainingArguments).parameters)
+    return TrainingArguments(**{key: value for key, value in kwargs.items() if key in supported_args})
 
 
 class TransformerTextDataset(Dataset):
@@ -97,7 +104,7 @@ class NovelForgeTransformer:
         train_dataset = self.make_dataset(train_texts, train_labels)
         valid_dataset = self.make_dataset(valid_texts, valid_labels)
 
-        training_args = TrainingArguments(
+        training_args = make_training_arguments(
             output_dir=self.config.output_dir,
             learning_rate=self.config.learning_rate,
             per_device_train_batch_size=self.config.train_batch_size,
@@ -106,6 +113,7 @@ class NovelForgeTransformer:
             weight_decay=self.config.weight_decay,
             eval_strategy="epoch",
             save_strategy="epoch",
+            save_safetensors=False,
             load_best_model_at_end=True,
             metric_for_best_model="f1_micro",
             greater_is_better=True,
@@ -130,7 +138,7 @@ class NovelForgeTransformer:
         """Predict multilabel probabilities."""
         dummy_labels = np.zeros((len(texts), self.num_labels), dtype="float32")
         dataset = self.make_dataset(texts, dummy_labels)
-        args = TrainingArguments(
+        args = make_training_arguments(
             output_dir=str(Path(self.config.output_dir) / "predict_tmp"),
             per_device_eval_batch_size=batch_size or self.config.eval_batch_size,
             report_to=[],
@@ -176,7 +184,10 @@ class NovelForgeTransformer:
         """Persist model and tokenizer."""
         output_dir = Path(output_dir or self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        self.model.save_pretrained(output_dir)  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+        self.model.save_pretrained(  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+            output_dir,
+            safe_serialization=False,
+        )
         self.tokenizer.save_pretrained(output_dir)  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
 
     @classmethod

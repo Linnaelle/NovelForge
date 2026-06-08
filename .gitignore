@@ -1,5 +1,6 @@
 venv/
 data/
+.env
 *.csv
 __pycache__/
 *.pyc

@@ -1,5 +1,5 @@
 # pyright: reportMissingTypeStubs=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false
-"""Streamlit dashboard for NovelForge genre prediction."""
+"""Streamlit app for NovelForge genre prediction."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from sklearn.preprocessing import MultiLabelBinarizer
 PROJECT_DIR = Path(__file__).resolve().parent
 
 from src.baseline_ml import BaselineModel
+from src.model_store import DEFAULT_MODEL_REPO_ID, ensure_model_dir, ensure_model_file
 from src.preprocessing import (
     TextPreprocessor,
     add_filtered_label_column,
@@ -35,12 +36,106 @@ ENHANCED_PATH = MODELS_DIR / "enhanced_tfidf.joblib"
 ENHANCED_LABELS_PATH = MODELS_DIR / "enhanced_labels.joblib"
 ENHANCED_THRESHOLDS_PATH = MODELS_DIR / "enhanced_thresholds.joblib"
 ENHANCED_METRICS_PATH = REPORTS_DIR / "enhanced_before_after_metrics.csv"
+ENHANCED_TRANSFORMER_METRICS_PATH = REPORTS_DIR / "transformer_enriched_metrics.csv"
 LSTM_PATH = MODELS_DIR / "lstm_novelforge.pt"
 LSTM_METADATA_PATH = MODELS_DIR / "lstm_metadata.joblib"
 TRANSFORMER_DIR = MODELS_DIR / "transformer_novelforge"
 TRANSFORMER_LABELS_PATH = MODELS_DIR / "transformer_labels.joblib"
 ENHANCED_TRANSFORMER_DIR = MODELS_DIR / "transformer_enriched_novelforge"
 ENHANCED_TRANSFORMER_LABELS_PATH = MODELS_DIR / "transformer_enriched_labels.joblib"
+
+
+def get_configured_model_repo() -> str:
+    """Read the Hugging Face model repository from env vars or Streamlit secrets."""
+    env_repo = os.getenv("NOVELFORGE_MODEL_REPO")
+    if env_repo:
+        return env_repo
+
+    try:
+        secret_repo = st.secrets.get("NOVELFORGE_MODEL_REPO") or st.secrets.get("model_repo")
+    except Exception:
+        secret_repo = None
+
+    return str(secret_repo) if secret_repo else DEFAULT_MODEL_REPO_ID
+
+
+def get_configured_hf_token() -> str | None:
+    """Read an optional Hugging Face token from env vars or Streamlit secrets."""
+    env_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
+    if env_token:
+        return env_token
+
+    try:
+        secret_token = st.secrets.get("HF_TOKEN") or st.secrets.get("hf_token")
+    except Exception:
+        secret_token = None
+
+    return str(secret_token) if secret_token else None
+
+
+def ensure_hf_file(filename: str, target_path: Path) -> Path | None:
+    """Download a single artifact from the configured HF repo when missing."""
+    return ensure_model_file(
+        filename,
+        target_path,
+        repo_id=get_configured_model_repo(),
+        token=get_configured_hf_token(),
+    )
+
+
+def ensure_hf_dir(dirname: str, target_dir: Path) -> Path | None:
+    """Download an artifact directory from the configured HF repo when missing."""
+    return ensure_model_dir(
+        dirname,
+        target_dir,
+        repo_id=get_configured_model_repo(),
+        token=get_configured_hf_token(),
+    )
+
+
+def has_local_or_remote_models() -> bool:
+    """Return whether remote model loading is configured for the app."""
+    return bool(get_configured_model_repo())
+
+
+MODEL_TEST_RESULTS = [
+    {
+        "model": "Baseline TF-IDF classique",
+        "test_protocol": "Notebook 2 - split aleatoire NovelForge",
+        "test_rows": 13_903,
+        "labels": 34,
+        "threshold_strategy": "global 0.50",
+        "f1_micro": 0.4213,
+        "f1_macro": 0.3734,
+        "jaccard_samples": 0.2849,
+        "hamming_loss": 0.1393,
+        "comparison_scope": "Reference initiale",
+    },
+    {
+        "model": "LSTM PyTorch",
+        "test_protocol": "Notebook 3 - sous-echantillon CPU NovelForge",
+        "test_rows": 2_400,
+        "labels": 34,
+        "threshold_strategy": "global 0.45",
+        "f1_micro": 0.1718,
+        "f1_macro": 0.1588,
+        "jaccard_samples": 0.0931,
+        "hamming_loss": 0.8670,
+        "comparison_scope": "Validation pedagogique",
+    },
+    {
+        "model": "Transformer demo",
+        "test_protocol": "Notebook 4 - mini test NovelForge",
+        "test_rows": 60,
+        "labels": 32,
+        "threshold_strategy": "global 0.50",
+        "f1_micro": 0.1424,
+        "f1_macro": 0.0375,
+        "jaccard_samples": 0.0788,
+        "hamming_loss": 0.1443,
+        "comparison_scope": "Demo technique",
+    },
+]
 
 
 def find_dataset_path() -> Path | None:
@@ -105,6 +200,10 @@ def load_dataset(uploaded_dataset: bytes | None = None, dataset_url: str | None 
 def load_or_train_baseline(uploaded_dataset: bytes | None = None, dataset_url: str | None = None):
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
+    if uploaded_dataset is None and dataset_url is None:
+        ensure_hf_file("baseline_tfidf.joblib", BASELINE_PATH)
+        ensure_hf_file("baseline_labels.joblib", BASELINE_LABELS_PATH)
+
     if uploaded_dataset is None and dataset_url is None and BASELINE_PATH.exists() and BASELINE_LABELS_PATH.exists():
         return joblib.load(BASELINE_PATH), joblib.load(BASELINE_LABELS_PATH)
 
@@ -131,6 +230,10 @@ def load_or_train_baseline(uploaded_dataset: bytes | None = None, dataset_url: s
 
 @st.cache_resource(show_spinner="Chargement de la baseline enrichie...")
 def load_enhanced_baseline_if_available():
+    ensure_hf_file("enhanced_tfidf.joblib", ENHANCED_PATH)
+    ensure_hf_file("enhanced_labels.joblib", ENHANCED_LABELS_PATH)
+    ensure_hf_file("enhanced_thresholds.joblib", ENHANCED_THRESHOLDS_PATH)
+
     if not ENHANCED_PATH.exists() or not ENHANCED_LABELS_PATH.exists():
         return None, None, None
 
@@ -148,8 +251,63 @@ def load_enhanced_metrics() -> pd.DataFrame | None:
     return pd.read_csv(ENHANCED_METRICS_PATH)
 
 
+@st.cache_data(show_spinner=False)
+def load_enhanced_transformer_metrics() -> pd.DataFrame | None:
+    if not ENHANCED_TRANSFORMER_METRICS_PATH.exists():
+        return None
+
+    return pd.read_csv(ENHANCED_TRANSFORMER_METRICS_PATH)
+
+
+def build_test_results_table() -> pd.DataFrame:
+    rows = list(MODEL_TEST_RESULTS)
+
+    enhanced_metrics = load_enhanced_metrics()
+    if enhanced_metrics is not None:
+        for _, row in enhanced_metrics.iterrows():
+            model_name = "Baseline enrichie" if str(row["model"]).startswith("after") else "Baseline avant regroupee"
+            rows.append(
+                {
+                    "model": model_name,
+                    "test_protocol": "Notebook 5 - meme test NovelForge groupe",
+                    "test_rows": 10_439,
+                    "labels": 26,
+                    "threshold_strategy": row["threshold_strategy"],
+                    "f1_micro": row["f1_micro"],
+                    "f1_macro": row["f1_macro"],
+                    "jaccard_samples": row["jaccard_samples"],
+                    "hamming_loss": row["hamming_loss"],
+                    "comparison_scope": "Avant/apres comparable",
+                }
+            )
+
+    transformer_metrics = load_enhanced_transformer_metrics()
+    if transformer_metrics is not None:
+        for _, row in transformer_metrics.iterrows():
+            rows.append(
+                {
+                    "model": "Transformer enrichi",
+                    "test_protocol": "Notebook 6 - echantillon NovelForge groupe",
+                    "test_rows": int(row["test_rows"]),
+                    "labels": 26,
+                    "threshold_strategy": row["threshold_strategy"],
+                    "f1_micro": row["f1_micro"],
+                    "f1_macro": row["f1_macro"],
+                    "jaccard_samples": row["jaccard_samples"],
+                    "hamming_loss": row["hamming_loss"],
+                    "comparison_scope": "Exploration avancee",
+                }
+            )
+
+    results = pd.DataFrame(rows)
+    return results.sort_values(["f1_micro", "f1_macro"], ascending=False).reset_index(drop=True)
+
+
 @st.cache_resource(show_spinner="Chargement du Transformer local...")
 def load_transformer_if_available():
+    ensure_hf_dir("transformer_novelforge", TRANSFORMER_DIR)
+    ensure_hf_file("transformer_labels.joblib", TRANSFORMER_LABELS_PATH)
+
     if not TRANSFORMER_DIR.exists() or not TRANSFORMER_LABELS_PATH.exists():
         return None, None
 
@@ -164,6 +322,10 @@ def load_transformer_if_available():
 
 @st.cache_resource(show_spinner="Chargement du Transformer enrichi...")
 def load_enhanced_transformer_if_available():
+    ensure_hf_dir("transformer_enriched_novelforge", ENHANCED_TRANSFORMER_DIR)
+    ensure_hf_file("transformer_enriched_labels.joblib", ENHANCED_TRANSFORMER_LABELS_PATH)
+    ensure_hf_file("transformer_enriched_thresholds.joblib", MODELS_DIR / "transformer_enriched_thresholds.joblib")
+
     if not ENHANCED_TRANSFORMER_DIR.exists() or not ENHANCED_TRANSFORMER_LABELS_PATH.exists():
         return None, None
 
@@ -183,6 +345,9 @@ def load_enhanced_transformer_if_available():
 
 @st.cache_resource(show_spinner="Chargement du LSTM local...")
 def load_lstm_if_available():
+    ensure_hf_file("lstm_novelforge.pt", LSTM_PATH)
+    ensure_hf_file("lstm_metadata.joblib", LSTM_METADATA_PATH)
+
     if not LSTM_PATH.exists() or not LSTM_METADATA_PATH.exists():
         return None, None, None, None
 
@@ -287,204 +452,193 @@ def predict_with_enhanced_transformer(text: str) -> pd.DataFrame | None:
 
 def render_predictions(predictions: pd.DataFrame, top_n: int) -> None:
     top_predictions = predictions.head(top_n).copy()
-    st.bar_chart(top_predictions.set_index("genre")["probability"])
-
+    
+    tags_html = '<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem;">'
     for _, row in top_predictions.iterrows():
-        st.progress(float(row["probability"]), text=f"{row['genre']} - {row['probability']:.2%}")
+        prob = float(row["probability"])
+        
+        if prob > 0.50:
+            bg_color = "rgba(255, 75, 75, 0.15)"
+            border_color = "rgba(255, 75, 75, 0.6)"
+        elif prob > 0.25:
+            bg_color = "rgba(255, 164, 164, 0.1)"
+            border_color = "rgba(255, 164, 164, 0.5)"
+        else:
+            bg_color = "rgba(128, 128, 128, 0.05)"
+            border_color = "rgba(128, 128, 128, 0.3)"
+            
+        tags_html += f"""
+        <div style="padding: 0.3rem 0.8rem; border-radius: 20px; 
+                    background-color: {bg_color}; border: 1px solid {border_color};
+                    color: var(--text-color); font-size: 0.9rem; font-weight: 500;
+                    display: flex; align-items: center; gap: 6px;">
+            {row['genre']} 
+            <span style="opacity: 0.5; font-size: 0.8rem;">{prob:.0%}</span>
+        </div>
+        """
+    tags_html += "</div>"
+    
+    st.html(tags_html)
 
-    if "selected" in predictions.columns:
-        selected = predictions[predictions["selected"]].sort_values("probability", ascending=False)
-        if not selected.empty:
-            st.caption("Genres retenus par les seuils optimises : " + ", ".join(selected["genre"].head(top_n)))
+    with st.expander("📊 Voir le détail analytique"):
+        for _, row in top_predictions.iterrows():
+            st.progress(float(row["probability"]), text=f"{row['genre']}")
+
+        if "selected" in predictions.columns:
+            selected = predictions[predictions["selected"]].sort_values("probability", ascending=False)
+            if not selected.empty:
+                st.caption("✨ Genres validés par les seuils : " + ", ".join(selected["genre"].head(top_n)))
 
 
 def main() -> None:
-    st.set_page_config(page_title="NovelForge", page_icon="NF", layout="wide")
-    st.title("NovelForge")
-    st.caption("Prediction multilabel des genres d'un Light Novel / Manhwa a partir du synopsis.")
+    st.set_page_config(page_title="NovelForge", page_icon="✨", layout="centered")
+    
+    st.markdown(
+        """
+        <style>
+        /* Aérer le conteneur principal */
+        .block-container { padding-top: 3rem; max-width: 850px; }
+        
+        /* Styliser le titre pour qu'il s'adapte au thème de l'utilisateur */
+        .main-title { 
+            text-align: center; 
+            font-size: 3.5rem; 
+            font-weight: 800; 
+            color: var(--text-color);
+            margin-bottom: 0.5rem;
+        }
+        .subtitle { 
+            text-align: center; 
+            font-size: 1.1rem; 
+            opacity: 0.7; 
+            color: var(--text-color);
+            margin-bottom: 3rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    st.markdown("<div class='main-title'>NovelForge ✨</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>L'IA qui découvre les genres littéraires cachés dans votre synopsis.</div>", unsafe_allow_html=True)
 
     dataset_url = get_configured_dataset_url()
+    model_repo = get_configured_model_repo()
+    remote_models_enabled = has_local_or_remote_models()
     uploaded_dataset_bytes = None
 
     with st.sidebar:
-        st.header("Donnees")
-        if find_dataset_path() is not None:
-            st.success("Dataset local detecte.")
-        elif dataset_url:
-            st.info("Dataset charge via secret Streamlit.")
-        else:
-            st.warning("Aucun dataset disponible pour entrainer la baseline.")
+        st.header("⚙️ Réglages")
+        top_n = st.slider("Nombre de genres à afficher", min_value=3, max_value=15, value=8)
+        
+        with st.expander("🛠️ Mode Développeur (Statut des modèles)", expanded=False):
+            if find_dataset_path() is not None:
+                st.success("Dataset local : OK")
+            st.info(f"Repo HF modeles : {model_repo}")
+            
+            st.markdown("**Moteurs de prédiction :**")
+            if BASELINE_PATH.exists() and BASELINE_LABELS_PATH.exists(): st.write("Baseline TF-IDF locale : OK")
+            if ENHANCED_PATH.exists() and ENHANCED_LABELS_PATH.exists(): st.write("Baseline enrichie locale : OK")
+            if LSTM_PATH.exists() and LSTM_METADATA_PATH.exists(): st.write("LSTM PyTorch local : OK")
+            if TRANSFORMER_DIR.exists(): st.write("✅ Transformer local")
+            if ENHANCED_TRANSFORMER_DIR.exists(): st.write("✅ Transformer enrichi")
+            if remote_models_enabled: st.write("HF actif : les modeles manquants seront telecharges a la demande.")
 
-        with st.expander("Options avancees", expanded=False):
-            st.caption(
-                "L'import CSV sert uniquement a reentrainer temporairement la baseline TF-IDF classique. "
-                "La baseline enrichie sauvegardee n'est pas modifiee."
-            )
-            uploaded_dataset = st.file_uploader(
-                "Dataset CSV optionnel",
-                type=["csv"],
-                help="Le CSV doit contenir une colonne de texte et une colonne de genres/tags.",
-            )
+            uploaded_dataset = st.file_uploader("Forcer un CSV local", type=["csv"])
             if uploaded_dataset is not None:
                 uploaded_dataset_bytes = uploaded_dataset.getvalue()
-                st.success("Dataset charge pour cette session.")
 
-        st.header("Modeles")
-        st.success("Baseline TF-IDF disponible")
-        if LSTM_PATH.exists() and LSTM_METADATA_PATH.exists():
-            st.success("LSTM PyTorch disponible")
-        else:
-            st.info("LSTM absent : relancer la cellule de sauvegarde du notebook 3.")
-        if TRANSFORMER_DIR.exists() and TRANSFORMER_LABELS_PATH.exists():
-            st.success("Transformer local disponible")
-        else:
-            st.info("Transformer absent : relancer le notebook 4 si besoin.")
-        if ENHANCED_TRANSFORMER_DIR.exists() and ENHANCED_TRANSFORMER_LABELS_PATH.exists():
-            st.success("Transformer enrichi disponible")
-        else:
-            st.info("Transformer enrichi absent : relancer le notebook 6 si besoin.")
-        if ENHANCED_PATH.exists() and ENHANCED_LABELS_PATH.exists():
-            st.success("Baseline enrichie disponible")
-        else:
-            st.info("Baseline enrichie absente : lancer `scripts/train_enriched_baseline.py`.")
-
-    tab_predict, tab_compare, tab_transparency = st.tabs(["Prediction", "Avant / Apres", "Transparence IA"])
+    tab_predict, tab_compare, tab_about = st.tabs(["📝 Analyseur", "🔬 Comparatif IA", "ℹ️ Comment ça marche ?"])
 
     with tab_predict:
-        with st.expander("Guide de demonstration des 3 approches", expanded=False):
-            st.markdown(
-                """
-                **1. Baseline TF-IDF + Regression** : approche statistique tres rapide. Elle lit surtout les mots presents,
-                mais ignore l'ordre et la negation.
-
-                **2. LSTM PyTorch** : approche sequentielle construite de A a Z. Elle lit les tokens dans l'ordre,
-                mais reste limitee par la taille d'entrainement et son F1 micro plus faible.
-
-                **3. Transformer / DistilBERT** : approche Transfer Learning avec attention globale. Elle sert a montrer
-                pourquoi l'etat de l'art est mieux arme pour relier les mots importants dans une phrase.
-                """
-            )
-            st.code("Ce n'est pas une histoire d'Action, mais plutot une Romance.", language="text")
-
-        engine_options = ["Baseline TF-IDF"]
-        if ENHANCED_PATH.exists() and ENHANCED_LABELS_PATH.exists():
-            engine_options.append("Baseline enrichie")
-        if LSTM_PATH.exists() and LSTM_METADATA_PATH.exists():
-            engine_options.append("LSTM PyTorch")
-        if TRANSFORMER_DIR.exists() and TRANSFORMER_LABELS_PATH.exists():
-            engine_options.append("Transformer local")
-        if ENHANCED_TRANSFORMER_DIR.exists() and ENHANCED_TRANSFORMER_LABELS_PATH.exists():
-            engine_options.append("Transformer enrichi")
+        synopsis = st.text_area(
+            "Collez votre résumé :",
+            height=200,
+            placeholder="Dans un monde où la magie a disparu, un jeune forgeron découvre une épée ancienne qui chuchote dans son esprit...",
+            label_visibility="visible"
+        )
+        
+        engine_options = []
+        if remote_models_enabled or ENHANCED_PATH.exists(): engine_options.append("Baseline enrichie (Recommandé)")
+        engine_options.append("Baseline TF-IDF (Rapide)")
+        if remote_models_enabled or ENHANCED_TRANSFORMER_DIR.exists(): engine_options.append("Transformer enrichi")
+        if remote_models_enabled or TRANSFORMER_DIR.exists(): engine_options.append("Transformer local")
+        if remote_models_enabled or LSTM_PATH.exists(): engine_options.append("LSTM PyTorch (Expérimental)")
 
         selected_engines = st.multiselect(
-            "Modeles a comparer",
+            "Quelles IA voulez-vous consulter ?",
             options=engine_options,
-            default=["Baseline TF-IDF"],
+            default=[engine_options[0]] if engine_options else ["Baseline TF-IDF (Rapide)"],
         )
-        synopsis = st.text_area(
-            "Synopsis",
-            height=220,
-            placeholder="Collez ici le synopsis d'un Light Novel, Manhwa ou Manhua...",
-        )
-        top_n = st.slider("Nombre de genres affiches", min_value=5, max_value=20, value=10)
 
-        if st.button("Predire les genres", type="primary"):
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            analyze_button = st.button("✨ Analyser le synopsis", type="primary", width='stretch')
+
+        if analyze_button:
             if len(synopsis.split()) < 5:
-                st.warning("Veuillez saisir un synopsis un peu plus long.")
+                st.warning("👋 Le synopsis est un peu trop court pour que l'IA puisse l'analyser correctement.")
             elif not selected_engines:
-                st.warning("Veuillez selectionner au moins un modele.")
+                st.warning("Veuillez sélectionner au moins un modèle d'IA.")
             else:
+                st.markdown("---")
                 columns = st.columns(len(selected_engines))
 
                 for column, engine in zip(columns, selected_engines):
                     with column:
-                        st.subheader(engine)
+                        clean_name = engine.replace(" (Recommandé)", "").replace(" (Rapide)", "").replace(" (Expérimental)", "")
+                        st.markdown(f"### 🤖 {clean_name}")
 
                         try:
-                            if engine == "Transformer local":
+                            if "Transformer local" in engine:
                                 predictions = predict_with_transformer(synopsis)
-                                if predictions is None:
-                                    st.info("Aucun Transformer local disponible.")
-                                    continue
-                            elif engine == "Transformer enrichi":
+                            elif "Transformer enrichi" in engine:
                                 predictions = predict_with_enhanced_transformer(synopsis)
-                                if predictions is None:
-                                    st.info("Aucun Transformer enrichi disponible.")
-                                    continue
-                            elif engine == "Baseline enrichie":
+                            elif "Baseline enrichie" in engine:
                                 predictions = predict_with_enhanced_baseline(synopsis)
-                                if predictions is None:
-                                    st.info("Aucune baseline enrichie disponible.")
-                                    continue
-                            elif engine == "LSTM PyTorch":
+                            elif "LSTM" in engine:
                                 predictions = predict_with_lstm(synopsis)
-                                if predictions is None:
-                                    st.info("Aucun LSTM local disponible. Relance le notebook 3 pour sauvegarder ses artefacts.")
-                                    continue
                             else:
-                                predictions = predict_with_baseline(
-                                    synopsis,
-                                    uploaded_dataset=uploaded_dataset_bytes,
-                                    dataset_url=dataset_url,
-                                )
+                                predictions = predict_with_baseline(synopsis, uploaded_dataset=uploaded_dataset_bytes, dataset_url=dataset_url)
 
-                            render_predictions(predictions, top_n=top_n)
-                        except FileNotFoundError as error:
-                            st.error(str(error))
+                            if predictions is not None:
+                                render_predictions(predictions, top_n=top_n)
+                            else:
+                                st.error("Modèle introuvable sur le serveur.")
+                                
+                        except Exception as error:
+                            st.error(f"Une erreur est survenue : {str(error)}")
 
     with tab_compare:
-        st.header("Avant / Apres")
-        metrics = load_enhanced_metrics()
-        if metrics is None:
-            st.info("Aucune metrique enrichie trouvee. Lance `scripts/train_enriched_baseline.py` pour generer la comparaison.")
-        else:
-            display_columns = [
-                "model",
-                "threshold_strategy",
-                "train_rows",
-                "external_rows",
-                "f1_micro",
-                "f1_macro",
-                "f1_weighted",
-                "jaccard_samples",
-                "hamming_loss",
-            ]
-            st.dataframe(metrics[display_columns], use_container_width=True, hide_index=True)
+        st.header("Performances des modèles")
+        st.markdown("Cet espace est dédié à l'évaluation technique des différentes architectures entraînées pour ce projet.")
 
-            chart = metrics.set_index("model")[["f1_micro", "f1_macro", "f1_weighted"]]
-            chart.index = metrics["model"] + " / " + metrics["threshold_strategy"]
-            st.bar_chart(chart)
+        test_results = build_test_results_table()
+        if not test_results.empty:
+            best = test_results.iloc[0]
+            metric_cols = st.columns(4)
+            metric_cols[0].metric("Meilleur modèle", str(best["model"]))
+            metric_cols[1].metric("F1 micro test", f"{best['f1_micro']:.3f}")
+            metric_cols[2].metric("F1 macro test", f"{best['f1_macro']:.3f}")
+            metric_cols[3].metric("Test", f"{int(best['test_rows']):,} lignes")
+            
+            st.dataframe(test_results, width='stretch', hide_index=True)
 
-            best_row = metrics.sort_values("f1_micro", ascending=False).iloc[0]
-            st.success(
-                "Meilleur resultat actuel : "
-                f"{best_row['model']} ({best_row['threshold_strategy']}) "
-                f"avec F1 micro {best_row['f1_micro']:.3f}."
-            )
-
-    with tab_transparency:
-        st.header("Transparence IA")
+    with tab_about:
+        st.header("Transparence & Pédagogie")
+        st.info("NovelForge est un outil d'assistance à l'édition développé dans le cadre d'un projet de Deep Learning.")
         st.markdown(
             """
-            **Limites principales**
+            **Comment ça marche ?**
+            L'IA a été entraînée sur des dizaines de milliers de synopsis issus des bases de données de Light Novels et de Manhwas. 
+            Elle a appris à associer le vocabulaire et le contexte d'un texte à ses genres littéraires (Action, Romance, Isekai, etc.).
 
-            - Le dataset vient de tags editoriaux : certains labels sont des genres, d'autres des formats ou tropes.
-            - Les genres rares sont difficiles a apprendre et peuvent etre sous-predits ou sur-predits.
-            - La baseline TF-IDF ignore l'ordre global des mots, meme si elle reste robuste et rapide.
-            - Le LSTM lit les sequences, mais son entrainement local limite peut produire des probabilites hesitantes.
-            - Le Transformer local n'est disponible que s'il a ete fine-tune et sauvegarde dans `models/transformer_novelforge`.
-            - La baseline enrichie utilise une taxonomie regroupee : certains labels adultes ou BL/GL sont volontairement fusionnes.
-            - Les modeles ont ete entraines sur des synopsis en anglais : les textes en francais sont acceptes techniquement, mais les predictions sont moins fiables.
-            - L'import CSV des options avancees ne modifie que la baseline classique de la session, pas le modele enrichi sauvegarde.
-            - Les probabilites ne doivent pas etre lues comme des certitudes absolues : elles servent a prioriser des genres plausibles.
-
-            **Bon usage**
-
-            Utiliser NovelForge comme assistant d'annotation ou de recommandation, pas comme verite finale.
-            Une validation humaine reste necessaire, surtout pour les synopsis ambigus ou hybrides.
+            **Limites de l'IA (Transparence)**
+            - **Biais d'entraînement :** L'IA est performante sur les tropes asiatiques (Manhwa/Light Novel) en anglais. Elle sera moins précise sur de la littérature classique française.
+            - **L'ordre des mots :** Les modèles 'Rapides' (TF-IDF) ignorent l'ordre des mots et cherchent des mots-clés. Les modèles 'Avancés' (Transformers) comprennent le contexte.
+            - **Usage recommandé :** Les probabilités affichées sont des suggestions d'aide au référencement. Une validation humaine reste indispensable.
             """
         )
-
 
 if __name__ == "__main__":
     main()
